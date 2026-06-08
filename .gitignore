@@ -1,0 +1,108 @@
+# ---------------------------------------------------------------------------
+# Private working folders — interview prep, handoff notes, scratch
+# ---------------------------------------------------------------------------
+plan/
+docs/
+
+# ---------------------------------------------------------------------------
+# Agentic tooling artifacts — must never ship to the repo we hand over
+# ---------------------------------------------------------------------------
+.gsd/
+.bg-shell/
+.claude/
+.cursor/
+.aider*
+.continue/
+.pi/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+.pyenv/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# ---------------------------------------------------------------------------
+# Jupyter
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Notebooks: keep the deliverable. If you need to share without outputs,
+# strip with `jupyter nbconvert --clear-output --inplace <file>.ipynb`.
+
+# ---------------------------------------------------------------------------
+# Generated data artifacts — cheap to regenerate, expensive to diff
+# ---------------------------------------------------------------------------
+data/features.parquet
+data/artifacts.joblib
+data/metrics.json
+data/metrics_pre_leak_fix.json
+
+# Raw Kaggle CSVs — not redistributed. See data/README.md for the download command.
+data/PdM_*.csv
+
+# ---------------------------------------------------------------------------
+# IDE / editor
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Logs / temp
+# ---------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+.cache/
