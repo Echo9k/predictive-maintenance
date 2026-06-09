@@ -78,13 +78,27 @@ def telemetry_features(tel: pd.DataFrame) -> pd.DataFrame:
 
 
 def error_features(err: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
-    """Count of each error type over the trailing 24h, evaluated on the grid."""
+    """Count of each error type over the trailing 24h, evaluated on the grid.
+
+    Error events are sparse and irregular, so a rolling sum over the raw event
+    table would under-count: the gaps between events are missing rows, not zeros.
+    Each machine is therefore reindexed onto a full hourly clock (absent hours
+    filled with 0) before the 24h rolling sum, so the window is well defined at
+    every timestamp. The result is left-joined back onto the grid; grid rows with
+    no overlapping error history get 0, not NaN. Backward-looking only.
+
+    Args:
+        err: Raw error-event log (machineID, datetime, errorID).
+        grid: Point-in-time snapshot rows (machineID, datetime) to evaluate on.
+
+    Returns:
+        `grid` with one `<errorID>_count_24h` column per error type.
+    """
     e = err.copy()
     e["one"] = 1
     wide = (e.pivot_table(index=["machineID", "datetime"], columns="errorID",
                           values="one", aggfunc="sum")
              .reindex(columns=ERRORS).fillna(0).reset_index())
-    # expand to full hourly index per machine so rolling sums are well defined
     pieces = []
     for mid, gdf in wide.groupby("machineID"):
         full = (gdf.set_index("datetime").sort_index()
@@ -100,15 +114,33 @@ def error_features(err: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
 
 
 def maint_features(mnt: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
-    """Days since last replacement of each component (point-in-time, backward only)."""
+    """Days since each component was last replaced, as of every grid timestamp.
+
+    For each component, a `merge_asof(direction="backward")` joins every grid row
+    to the most recent replacement at or before its timestamp (per machine), so
+    the feature only ever sees the past. The value is the gap in days between the
+    grid timestamp and that replacement. Rows before a component's first recorded
+    replacement have no match and stay NaN.
+
+    Leakage subtlety: a failure of component K is also logged as a replacement of
+    K at the same instant, so a grid row at exactly t == failure would read
+    `days_since_compK == 0` and leak the label. That row is never labelled
+    positive by construction (`make_labels` uses strict t < ft), so the leaky
+    value has no positive row to attach to — see `make_labels`.
+
+    Args:
+        mnt: Maintenance/replacement log (machineID, datetime, comp).
+        grid: Point-in-time snapshot rows (machineID, datetime) to evaluate on.
+
+    Returns:
+        `grid` with one `days_since_<comp>` column per component.
+    """
     out = grid.copy()
     for comp in COMPS:
         rep = (mnt[mnt["comp"] == comp][["machineID", "datetime"]]
                .rename(columns={"datetime": "rep_time"})
                .sort_values("rep_time"))
         col = f"days_since_{comp}"
-        vals = np.full(len(out), np.nan)
-        # merge_asof per machine: most recent replacement at or before t
         g = (pd.merge_asof(out.sort_values("datetime"),
                            rep.sort_values("rep_time"),
                            by="machineID", left_on="datetime", right_on="rep_time",
@@ -120,17 +152,31 @@ def maint_features(mnt: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
 
 
 def make_labels(grid: pd.DataFrame, fail: pd.DataFrame) -> pd.DataFrame:
-    """Multi-class label: component failing in (t, t+24h], else 'none'. Forward-looking."""
+    """Multi-class forward-looking label: which component fails in (t, t+24h].
+
+    A grid row at time t for a machine is labelled with component c if c fails in
+    the window (t, t+24h], else "none". The label looks strictly forward; the
+    features never do (see `telemetry_features` / `maint_features`), and that
+    backward-features / forward-label split is the leakage guarantee.
+
+    The window is strict at the upper end (t < failure_time, not t <= it). A row
+    at exactly t == failure_time would, via `maint_features`' backward
+    merge_asof, read the failure-driven replacement record logged at that same
+    instant (failures are a subset of PdM_maint), turning `days_since_compK` into
+    a near-perfect tell. Strict-less-than gives that leaky feature value no
+    positive row to attach to, and it also matches the "predict 24h in advance"
+    brief — a zero-lead-time prediction has no operational value anyway.
+
+    Args:
+        grid: Feature rows (machineID, datetime) to label.
+        fail: Failure log (machineID, datetime, failure=component name).
+
+    Returns:
+        `grid` with a `label` column in {"none", "comp1", ..., "comp4"}.
+    """
     out = grid.copy()
     out["label"] = "none"
     horizon = pd.Timedelta(hours=LABEL_HORIZON_H)
-    # For each failure ft, mark grid rows of the same machine in [ft-24h, ft).
-    # Strictly t < ft (not t <= ft): the grid row at t == ft would have access
-    # via merge_asof(backward) to the failure-driven maintenance record at ft
-    # (because failures are also logged in PdM_maint at the same timestamp),
-    # turning `days_since_compK` into a near-perfect tell. Strict-less-than
-    # closes that intra-row leak and also matches the "24h in advance" brief:
-    # zero-lead-time rows aren't useful predictions anyway.
     out = out.sort_values(["machineID", "datetime"]).reset_index(drop=True)
     idx = {mid: g.index.values for mid, g in out.groupby("machineID")}
     times = out["datetime"].values

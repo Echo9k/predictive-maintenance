@@ -42,6 +42,7 @@ GAP = pd.Timedelta(days=1)
 
 
 def load():
+    """Load the feature table and attach the integer label column `y` (CLASSES order)."""
     df = pd.read_parquet(DATA / "features.parquet")
     df["model"] = df["model"].astype("category")
     df["y"] = df["label"].map(LABEL2ID).astype(int)
@@ -49,6 +50,17 @@ def load():
 
 
 def temporal_split(df):
+    """Split into fit/cal/test by time, dropping a 1-day gap at each boundary.
+
+    Fit is everything before FIT_END, calibration is the slice [FIT_END, CAL_END),
+    and test is everything from CAL_END on. The GAP removed before FIT_END and
+    CAL_END is the airgap: it keeps a fit/cal row's forward 24h label window from
+    reaching into the next segment — the inter-segment leak that the strict label
+    inequality in `make_labels` does not by itself cover.
+
+    Returns:
+        (fit, cal, test) DataFrames.
+    """
     t = df["datetime"]
     fit = df[t < FIT_END - GAP]
     cal = df[(t >= FIT_END) & (t < CAL_END - GAP)]
@@ -57,11 +69,29 @@ def temporal_split(df):
 
 
 def feature_cols(df):
+    """Model feature columns: every column except the keys, the raw label, and `y`."""
     drop = {"machineID", "datetime", "label", "y"}
     return [c for c in df.columns if c not in drop]
 
 
 def evaluate(name, proba, y_true, out):
+    """Score predictions with imbalance-aware metrics and record them in `out`.
+
+    Computes per-class precision/recall, one-vs-rest PR-AUC, and macro-recall,
+    plus — for the collapsed any-failure score (1 - P(none)) — its PR-AUC,
+    top-decile capture, and Brier score. Accuracy is stored as
+    `accuracy_misleading` to flag that it is uninformative at this base rate.
+    Prints a short summary and stores the full result dict at `out[name]`.
+
+    Args:
+        name: Label for this model's results.
+        proba: (n, 5) class-probability matrix, columns in CLASSES order.
+        y_true: Integer true labels.
+        out: Results dict accumulated across models (mutated in place).
+
+    Returns:
+        The result dict stored at `out[name]`.
+    """
     pred = proba.argmax(1)
     rep = classification_report(y_true, pred, target_names=CLASSES,
                                 output_dict=True, zero_division=0)
@@ -101,6 +131,13 @@ def evaluate(name, proba, y_true, out):
 
 
 def main():
+    """Train the models, evaluate on the held-out tail, and write metrics/artifacts.
+
+    Loads features, makes the temporal split, fits the primary LightGBM, isotonic-
+    calibrates it on the cal slice, fits the elastic-net baseline on a stratified
+    subsample, evaluates all three on the test tail, and writes metrics.json and
+    artifacts.joblib to data/.
+    """
     df = load()
     fit, cal, test = temporal_split(df)
     cols = feature_cols(df)

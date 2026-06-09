@@ -1,5 +1,6 @@
 pandas==2.3.3
 numpy==2.4.6
+pyarrow
 scikit-learn==1.8.0
 lightgbm==4.6.0
 shap==0.52.0
@@ -14,3 +15,6 @@ nbconvert==7.17.1
 ipykernel==7.2.0
 kaggle==2.2.1
 kagglehub==1.0.1
+optuna==4.1.0
+wandb==0.19.1
+python-dotenv==1.0.1
