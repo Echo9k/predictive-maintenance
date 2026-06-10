@@ -113,7 +113,7 @@ def error_features(err: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
         {f"{c}_count_24h": 0 for c in ERRORS})
 
 
-def maint_features(mnt: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
+def add_days_since(mnt: pd.DataFrame, grid: pd.DataFrame, comps=COMPS) -> pd.DataFrame:
     """Days since each component was last replaced, as of every grid timestamp.
 
     For each component, a `merge_asof(direction="backward")` joins every grid row
@@ -135,20 +135,21 @@ def maint_features(mnt: pd.DataFrame, grid: pd.DataFrame) -> pd.DataFrame:
     Returns:
         `grid` with one `days_since_<comp>` column per component.
     """
-    out = grid.copy()
-    for comp in COMPS:
-        rep = (mnt[mnt["comp"] == comp][["machineID", "datetime"]]
-               .rename(columns={"datetime": "rep_time"})
-               .sort_values("rep_time"))
-        col = f"days_since_{comp}"
-        g = (pd.merge_asof(out.sort_values("datetime"),
-                           rep.sort_values("rep_time"),
-                           by="machineID", left_on="datetime", right_on="rep_time",
-                           direction="backward"))
-        days = (g["datetime"] - g["rep_time"]).dt.total_seconds() / 86400.0
-        out = out.sort_values("datetime").reset_index(drop=True)
-        out[col] = days.values
+    out = grid.sort_values("datetime").reset_index(drop=True)
+    for comp in comps:
+        rep = (mnt.loc[mnt["comp"] == comp, ["machineID", "datetime"]]
+                  .rename(columns={"datetime": "rep_time"})
+                  .sort_values("rep_time"))
+        merged = pd.merge_asof(
+            out, rep,
+            by="machineID", left_on="datetime", right_on="rep_time",
+            direction="backward",
+        )
+        out[f"days_since_{comp}"] = (
+            (merged["datetime"] - merged["rep_time"]).dt.total_seconds() / 86_400
+        )
     return out
+
 
 
 def make_labels(grid: pd.DataFrame, fail: pd.DataFrame) -> pd.DataFrame:
@@ -174,21 +175,21 @@ def make_labels(grid: pd.DataFrame, fail: pd.DataFrame) -> pd.DataFrame:
     Returns:
         `grid` with a `label` column in {"none", "comp1", ..., "comp4"}.
     """
-    out = grid.copy()
-    out["label"] = "none"
     horizon = pd.Timedelta(hours=LABEL_HORIZON_H)
-    out = out.sort_values(["machineID", "datetime"]).reset_index(drop=True)
-    idx = {mid: g.index.values for mid, g in out.groupby("machineID")}
-    times = out["datetime"].values
-    for _, row in fail.iterrows():
-        mid, ft, comp = row["machineID"], row["datetime"], row["failure"]
-        rows = idx.get(mid)
-        if rows is None:
-            continue
-        t = times[rows]
-        mask = (t >= np.datetime64(ft - horizon)) & (t < np.datetime64(ft))
-        out.loc[rows[mask], "label"] = comp
-    return out
+    out = grid.sort_values(["machineID", "datetime"]).reset_index(drop=True)
+    fail_sorted = fail.sort_values("datetime")  # merge_asof requires sort by `on` key
+
+    merged = pd.merge_asof(
+        out,
+        fail_sorted[["machineID", "datetime", "failure"]],
+        on="datetime",
+        by="machineID",
+        direction="forward",                 # nearest failure at time >= t
+        allow_exact_matches=False,           # makes it strictly > t  (the t < ft half)
+        tolerance=horizon,                    # caps it at t + 24h     (the t >= ft - horizon half)
+    )
+    merged["label"] = merged.pop("failure").fillna("none")
+    return merged
 
 
 def build():
@@ -196,7 +197,7 @@ def build():
     telf = telemetry_features(tel)
     grid = telf[["machineID", "datetime"]].copy()
     errf = error_features(err, grid)
-    mntf = maint_features(mnt, grid)
+    mntf = add_days_since(mnt, grid)
 
     df = telf.merge(errf, on=["machineID", "datetime"], how="left")
     df = df.merge(mntf, on=["machineID", "datetime"], how="left")

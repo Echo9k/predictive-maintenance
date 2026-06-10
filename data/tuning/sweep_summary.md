@@ -15,12 +15,12 @@
 
 ## enet — `enet-pdm`
 
-- Trials: **10** | Best #4 | val PR-AUC **0.9593**
+- Trials: **10** | Best #7 | val PR-AUC **0.9711**
 
 | param | value |
 |---|---|
-| `C` | 0.25378 |
-| `l1_ratio` | 0.68727 |
+| `C` | 0.005337 |
+| `l1_ratio` | 0.21506 |
 
 ## Held-out test — head-to-head
 
@@ -28,4 +28,4 @@
 |---|---|---|---|
 | lightgbm_tuned_raw | 0.9700 | 0.9341 | 0.0016 |
 | lightgbm_tuned_calibrated | 0.9217 | 0.9312 | 0.0016 |
-| elasticnet_tuned | 0.9076 | 0.9323 | 0.0036 |
+| elasticnet_tuned | 0.9084 | 0.9302 | 0.0096 |
